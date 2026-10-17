@@ -73,7 +73,7 @@ jobs:
           generate_release_notes: true
           body: |
             Space Cadet Pinball with VR support (OpenXR). Game data is not included:
-            copy the original Space Cadet files into the unpacked folder.
+            copy the original Space Cadet files into the package's `assets` folder.
 
             * `linux-arm64`: Steam Frame standalone. Upload with the SteamOS Devkit Client,
               start command `run-vr.sh`, runtime "Steam Linux Runtime 3.0 ARM64 (Sniper)".
