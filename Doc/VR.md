@@ -40,7 +40,17 @@ shoulder buttons).
 ## Game data
 
 As with the upstream project, the original game data is not included. Copy `PINBALL.DAT` and the rest of
-the Space Cadet files (or the Full Tilt! `CADET.DAT` set) next to the executable.
+the Space Cadet files (or the Full Tilt! `CADET.DAT` set) into the `assets` folder next to the executable:
+
+```
+SpaceCadetPinball-VR-linux-arm64/
+├── SpaceCadetPinball
+├── run-vr.sh
+├── lib/
+└── assets/          <- PINBALL.DAT, FONT.DAT, table.bmp, *.WAV, *.MID
+```
+
+The game also still finds the files directly next to the executable or in the working directory.
 
 ## Running
 
@@ -58,7 +68,8 @@ If VR cannot start, the game shows an error and exits instead of falling back to
 1. On the headset: **Settings > System > Developer Mode**, then **Settings > Developer > Pair new host**.
 2. On a PC, open the **SteamOS Devkit Client**, register and connect to the Frame.
 3. **Title Upload**:
-   * Local Folder: the unpacked `SpaceCadetPinball-VR-linux-arm64` folder **with the game data copied in**
+   * Local Folder: the unpacked `SpaceCadetPinball-VR-linux-arm64` folder, **with the game files in its
+     `assets` folder**
    * Start Command: `run-vr.sh`
    * Runtime: **Steam Linux Runtime 3.0 ARM64 (Sniper)**
 4. Upload, then **Start**. It also appears under *Library > Non-Steam*.

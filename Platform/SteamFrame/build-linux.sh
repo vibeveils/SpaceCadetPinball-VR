@@ -75,8 +75,9 @@ strip "$STAGE/lib/libopenxr_loader.so.1" 2>/dev/null || true
 cp "$ROOT/Platform/SteamFrame/run-vr.sh" "$STAGE/"
 chmod +x "$STAGE/run-vr.sh"
 cp "$ROOT/Doc/VR.md" "$ROOT/LICENSE" "$ROOT/Platform/SteamFrame/THIRD_PARTY.txt" "$STAGE/"
-printf 'Copy the original Space Cadet game files (PINBALL.DAT, *.WAV, ...) into this folder.\n' \
-	> "$STAGE/PUT_GAME_DATA_HERE.txt"
+mkdir -p "$STAGE/assets"
+printf 'Copy the original Space Cadet game files (PINBALL.DAT, FONT.DAT, *.WAV, *.MID, ...) into this folder.\n' \
+	> "$STAGE/assets/PUT_GAME_DATA_HERE.txt"
 
 echo "== Dependencies"
 for f in "$STAGE/SpaceCadetPinball" "$STAGE/lib/libopenxr_loader.so.1"; do
