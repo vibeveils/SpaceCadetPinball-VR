@@ -3,8 +3,10 @@
 This fork adds a VR mode. The original 2D game runs unchanged; its frame (table, score panel and menus)
 is placed in a 3D scene rendered with Vulkan through OpenXR:
 
-* **Cabinet view** (default): the playfield sits on the angled top of a pinball cabinet, the score panel
-  is on the backbox, under glass with chrome rails and neon trim, in a space-themed arcade.
+* **Cabinet view** (default): the playfield lies flat on top of a pinball cabinet under glass, with the
+  score panel on the backbox, in a space-themed arcade. The table art is pre-rendered in perspective, so
+  it is "un-projected" with the game's own camera onto a true rectangle and VR supplies the perspective.
+  The metal frames painted into the artwork are used as the machine's frame.
 * **Theater view**: one large screen with the whole game, like the desktop version.
 
 Controller rumble follows the game (flippers, bumpers, kickers, plunger, tilt), and nudging physically
@@ -137,4 +139,6 @@ SDK).
   renderer (4x MSAA with lazily allocated attachments for tile-based GPUs, mip-mapped and anisotropically
   filtered game texture so the tilted playfield stays sharp), the pointer, haptics and table placement.
 * `vr/VrScene.cpp`, `vr/shaders` – procedural cabinet and environment geometry and a single uber-shader.
+* `winmain.cpp` (`VrUpdateArtworkLayout`) – finds the painted frame edges in the table image and maps the
+  flat playfield back onto the image through `proj` (the camera the artwork was rendered with).
 * `vr/VrFeedback.cpp` – maps the game's sound events to controller rumble.
