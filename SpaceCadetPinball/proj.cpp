@@ -79,6 +79,22 @@ vector3 proj::ReverseXForm(const vector2i& vec)
 	return {x0, y0, z0};
 }
 
+vector2 proj::xform_to_2d_f(const vector3& vec)
+{
+	auto projVec = matrix_vector_multiply(matrix, vec);
+	const float projCoef = projVec.Z == 0.0f ? 999999.88f : d_ / projVec.Z;
+	return {projVec.X * projCoef + centerx, projVec.Y * projCoef + centery};
+}
+
+vector3 proj::ReverseXFormF(float x, float y)
+{
+	const auto A = matrix.Row1.Y, B = matrix.Row1.Z, F = matrix.Row1.W, G = matrix.Row2.W, D = d_;
+	const auto x2 = (x - centerx) / D, y2 = (y - centery) / D, z0 = 0.0f;
+	auto y0 = (y2 * (A * z0 + G) - B * z0 - F) / (A + B * y2);
+	auto x0 = x2 * (A * z0 - B * y0 + G);
+	return {x0, y0, z0};
+}
+
 vector2i proj::xform_to_2d(const vector3& vec)
 {
 	float projCoef;

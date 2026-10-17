@@ -1302,6 +1302,8 @@ namespace vr
 		}
 
 		// Table space: origin at the front edge centre of the playfield; x right, y up, +z towards the player.
+		// The game's artwork already contains the machine's metal frames (around the playfield and the score
+		// panel), so the cabinet only adds what the artwork lacks: the body, legs and backbox shell.
 		void BuildCabinet(const FrameLayout& layout, bool uiVisible)
 		{
 			auto& sc = S.Scene;
@@ -1310,12 +1312,12 @@ namespace vr
 			const float boardPxH = (layout.Board[3] - layout.Board[1]) * S.LastFrameH;
 			const float sidePxW = (layout.Sidebar[2] - layout.Sidebar[0]) * S.LastFrameW;
 			const float sidePxH = (layout.Sidebar[3] - layout.Sidebar[1]) * S.LastFrameH;
-			const float boardAspect = boardPxH > 0 ? boardPxW / boardPxH : 0.9f;
 			const float sideAspect = sidePxH > 0 ? sidePxW / sidePxH : 0.55f;
+			const bool mapped = layout.PlayfieldMap && layout.PlayfieldAspect > 0.1f;
+			const float lengthOverWidth = mapped ? layout.PlayfieldAspect : (boardPxW > 0 ? boardPxH / boardPxW : 1.1f);
 
 			const float W = 0.56f * scale;
-			const float L = W / boardAspect;
-			const float m = 0.05f * scale;
+			const float L = W * lengthOverWidth;
 			const float th = Deg(S.Cfg.TiltDeg);
 			const float sn = std::sin(th), cs = std::cos(th);
 			auto P = [&](float s, float t, float h) { return Vec3{s, t * sn + h * cs, -t * cs + h * sn}; };
@@ -1330,12 +1332,11 @@ namespace vr
 			const float floorLocal = S.FloorY - origin.y;
 
 			size_t first = sc.Vertices.size();
-			size_t firstItem = sc.Items.size();
 
-			// --- body
+			// --- body, flush with the playfield artwork
 			const float yb = std::max(-0.32f * scale, floorLocal + 0.05f);
-			Vec3 tfl = P(-W / 2 - m, -m, -0.012f), tfr = P(W / 2 + m, -m, -0.012f);
-			Vec3 tbl = P(-W / 2 - m, L + m, -0.012f), tbr = P(W / 2 + m, L + m, -0.012f);
+			Vec3 tfl = P(-W / 2, 0, -0.004f), tfr = P(W / 2, 0, -0.004f);
+			Vec3 tbl = P(-W / 2, L, -0.004f), tbr = P(W / 2, L, -0.004f);
 			Vec3 body[8] = {
 				{tfl.x, yb, tfl.z}, {tfr.x, yb, tfr.z}, tfr, tfl,
 				{tbl.x, yb, tbl.z}, {tbr.x, yb, tbr.z}, tbr, tbl,
@@ -1343,26 +1344,11 @@ namespace vr
 			sc.Begin(Material::Lit);
 			sc.Hexa(body, NavyPaint);
 
-			// sloped bars on the playfield plane
-			auto bar = [&](float s0, float s1, float t0, float t1, float h0, float h1, const Color& col)
-			{
-				Vec3 c[8] = {
-					P(s0, t0, h0), P(s1, t0, h0), P(s1, t0, h1), P(s0, t0, h1),
-					P(s0, t1, h0), P(s1, t1, h0), P(s1, t1, h1), P(s0, t1, h1),
-				};
-				sc.Hexa(c, col);
-			};
-			bar(-W / 2 - m, -W / 2, -m, L + m, -0.012f, 0.03f, Chrome);       // left rail
-			bar(W / 2, W / 2 + m, -m, L + m, -0.012f, 0.03f, Chrome);          // right rail
-			bar(-W / 2, W / 2, -m, 0, -0.012f, 0.004f, DarkTrim);              // apron
-			bar(-W / 2, W / 2, L, L + m, -0.012f, 0.004f, DarkTrim);           // top bezel
-			bar(-W / 2 - m - 0.004f, W / 2 + m + 0.004f, -m - 0.03f, -m + 0.012f, 0.0f, 0.032f, Chrome); // lockdown bar
-
 			// legs and feet
 			if (floorLocal < yb - 0.05f)
 			{
 				const float lh = 0.022f * scale;
-				float xs[2] = {body[0].x + 0.06f * scale, body[1].x - 0.06f * scale};
+				float xs[2] = {body[0].x + 0.05f * scale, body[1].x - 0.05f * scale};
 				float zs[2] = {body[0].z - 0.06f * scale, body[4].z + 0.06f * scale};
 				for (float x : xs)
 					for (float z : zs)
@@ -1375,109 +1361,94 @@ namespace vr
 			}
 
 			// coin door on the front face
+			const float frontTop = tfl.y;
+			const float dc = yb + (frontTop - yb) * 0.5f;
 			{
 				Pose id;
-				float zf = body[0].z;
-				float dh = std::min(0.09f * scale, (0 - yb) * 0.3f);
-				float dc = yb + (0 - yb) * 0.5f;
-				sc.Box(id, {0, dc, zf + 0.006f}, {0.11f * scale, dh, 0.006f}, BlackChrome);
+				float dh = std::min(0.09f * scale, (frontTop - yb) * 0.3f);
+				sc.Box(id, {0, dc, body[0].z + 0.006f}, {0.11f * scale, dh, 0.006f}, BlackChrome);
 			}
 
-			// --- backbox
-			const float Hs = W * 1.02f;
+			// --- backbox: a shell exactly the size of the score panel artwork
+			const float Hs = W * 1.0f;
 			const float Ws = Hs * sideAspect;
-			const float Wb = W + 2 * m;
-			const float Hb = Hs + 0.13f * scale;
-			const float Db = 0.17f * scale;
+			const float Db = 0.15f * scale;
 			const float back = Deg(9.0f);
 			Pose bb;
 			bb.orientation = Quat::AxisAngle({1, 0, 0}, -back);
-			bb.position = P(0, L + m, -0.012f) + Vec3{0, -0.01f, 0.02f};
-			sc.Box(bb, {0, Hb / 2, -Db / 2}, {Wb / 2, Hb / 2, Db / 2}, NavyPaint);
-			// chrome trim around the backbox face
-			sc.Box(bb, {0, Hb - 0.008f, 0.004f}, {Wb / 2 + 0.004f, 0.008f, 0.006f}, Chrome);
-			sc.Box(bb, {0, 0.008f, 0.004f}, {Wb / 2 + 0.004f, 0.008f, 0.006f}, Chrome);
-			// dark inner bezel behind the score display
-			const float yc = Hb * 0.5f;
-			sc.Box(bb, {0, yc, 0.002f}, {Ws / 2 + 0.012f, Hs / 2 + 0.012f, 0.003f}, DarkTrim);
+			bb.position = P(0, L, -0.004f);
+			sc.Box(bb, {0, Hs / 2, -Db / 2}, {Ws / 2, Hs / 2, Db / 2}, NavyPaint);
 
-			// speaker grilles
-			float spkX = (Ws / 2 + Wb / 2) * 0.5f;
-			for (float sx : {-spkX, spkX})
-				for (float sy : {yc + Hs * 0.22f, yc - Hs * 0.22f})
-				{
-					Vec3 cpos = bb.Transform({sx, sy, 0.0015f});
-					sc.Disc(cpos, bb.TransformDir({1, 0, 0}), bb.TransformDir({0, 1, 0}), 0.0f,
-					        0.042f * scale, 24, DarkTrim);
-				}
-
-			// --- emissive trims
+			// --- lights on the cabinet body (not around the artwork)
 			sc.Begin(Material::Unlit, 1.6f);
 			auto stripe = [&](const Vec3& a, const Vec3& b, float y0, float y1, float dx, const Color& col)
 			{
 				sc.Quad(Vec3{a.x + dx, a.y + y0, a.z}, Vec3{b.x + dx, b.y + y0, b.z},
 				        Vec3{b.x + dx, b.y + y1, b.z}, Vec3{a.x + dx, a.y + y1, a.z}, col);
 			};
-			stripe(body[7], body[3], -0.045f, -0.03f, -0.002f, NeonCyan);  // left top stripe
-			stripe(body[2], body[6], -0.045f, -0.03f, 0.002f, NeonCyan);   // right top stripe
 			stripe(body[4], body[0], 0.02f, 0.03f, -0.002f, NeonMagenta);  // left bottom
 			stripe(body[1], body[5], 0.02f, 0.03f, 0.002f, NeonMagenta);   // right bottom
 			{
-				// front bottom stripe
 				Vec3 a = body[0], b = body[1];
 				sc.Quad(Vec3{a.x, a.y + 0.02f, a.z + 0.002f}, Vec3{b.x, b.y + 0.02f, b.z + 0.002f},
 				        Vec3{b.x, b.y + 0.03f, b.z + 0.002f}, Vec3{a.x, a.y + 0.03f, a.z + 0.002f}, NeonMagenta);
-				// coin slot lights
-				float dc = yb + (0 - yb) * 0.5f;
 				for (float x : {-0.045f * scale, 0.045f * scale})
 					sc.Quad(Vec3{x - 0.012f, dc - 0.02f, a.z + 0.0135f}, Vec3{x + 0.012f, dc - 0.02f, a.z + 0.0135f},
 					        Vec3{x + 0.012f, dc + 0.03f, a.z + 0.0135f}, Vec3{x - 0.012f, dc + 0.03f, a.z + 0.0135f},
 					        NeonAmber);
 			}
-			// backbox marquee light and side tubes
-			{
-				auto q = [&](float x0, float x1, float y0, float y1, float z, const Color& col)
-				{
-					sc.Quad(bb.Transform({x0, y0, z}), bb.Transform({x1, y0, z}), bb.Transform({x1, y1, z}),
-					        bb.Transform({x0, y1, z}), col);
-				};
-				q(-Wb / 2, Wb / 2, Hb + 0.0f, Hb + 0.012f, 0.0f, NeonCyan);
-				q(-Wb / 2 + 0.01f, -Wb / 2 + 0.018f, 0.03f, Hb - 0.03f, 0.003f, NeonMagenta);
-				q(Wb / 2 - 0.018f, Wb / 2 - 0.01f, 0.03f, Hb - 0.03f, 0.003f, NeonMagenta);
-				for (float sx : {-spkX, spkX})
-					for (float sy : {yc + Hs * 0.22f, yc - Hs * 0.22f})
-					{
-						Vec3 cpos = bb.Transform({sx, sy, 0.002f});
-						sc.Disc(cpos, bb.TransformDir({1, 0, 0}), bb.TransformDir({0, 1, 0}), 0.042f * scale,
-						        0.048f * scale, 32, NeonMagenta);
-					}
-			}
 
-			// --- screens
+			// --- artwork
 			// While a menu is open on the floating panel, dim the cabinet's copy of the frame.
 			const float screenLevel = uiVisible ? 0.3f : 1.0f;
 			auto& play = sc.Begin(Material::Screen);
-			SetUv(play, layout.Board);
 			play.Brightness = screenLevel;
-			sc.Quad(P(-W / 2, 0, 0), P(W / 2, 0, 0), P(W / 2, L, 0), P(-W / 2, L, 0), {1, 1, 1, 1});
+			play.EdgeFade = 0;
+			if (mapped)
+			{
+				// Undo the artwork's baked-in perspective: a finely subdivided flat rectangle whose vertices
+				// look up the image through the game's own camera. VR then supplies the real perspective.
+				const int nx = 16, ny = 40;
+				std::vector<Vec2> uv((nx + 1) * (ny + 1));
+				for (int j = 0; j <= ny; ++j)
+					for (int i = 0; i <= nx; ++i)
+					{
+						float u, v;
+						layout.PlayfieldMap(static_cast<float>(i) / nx, static_cast<float>(j) / ny, &u, &v);
+						uv[j * (nx + 1) + i] = {u, v};
+					}
+				const Vec3 n = Normalize(Cross(P(1, 0, 0) - P(0, 0, 0), P(0, 1, 0) - P(0, 0, 0)));
+				auto pos = [&](int i, int j) { return P(-W / 2 + W * i / nx, L * j / ny, 0); };
+				for (int j = 0; j < ny; ++j)
+					for (int i = 0; i < nx; ++i)
+					{
+						const Vec2 &a = uv[j * (nx + 1) + i], &b = uv[j * (nx + 1) + i + 1];
+						const Vec2 &c = uv[(j + 1) * (nx + 1) + i + 1], &d = uv[(j + 1) * (nx + 1) + i];
+						sc.Tri(pos(i, j), pos(i + 1, j), pos(i + 1, j + 1), a, b, c, n, {1, 1, 1, 1});
+						sc.Tri(pos(i, j), pos(i + 1, j + 1), pos(i, j + 1), a, c, d, n, {1, 1, 1, 1});
+					}
+			}
+			else
+			{
+				SetUv(play, layout.Board);
+				sc.Quad(P(-W / 2, 0, 0), P(W / 2, 0, 0), P(W / 2, L, 0), P(-W / 2, L, 0), {1, 1, 1, 1});
+			}
 			auto& side = sc.Begin(Material::Screen);
 			SetUv(side, layout.Sidebar);
 			side.Brightness = screenLevel;
-			sc.Quad(bb.Transform({-Ws / 2, yc - Hs / 2, 0.006f}), bb.Transform({Ws / 2, yc - Hs / 2, 0.006f}),
-			        bb.Transform({Ws / 2, yc + Hs / 2, 0.006f}), bb.Transform({-Ws / 2, yc + Hs / 2, 0.006f}),
-			        {1, 1, 1, 1});
+			side.EdgeFade = 0;
+			sc.Quad(bb.Transform({-Ws / 2, 0, 0.001f}), bb.Transform({Ws / 2, 0, 0.001f}),
+			        bb.Transform({Ws / 2, Hs, 0.001f}), bb.Transform({-Ws / 2, Hs, 0.001f}), {1, 1, 1, 1});
 
 			// --- glass (blended, drawn last)
 			sc.Begin(Material::Glass, 0, true);
-			sc.Quad(P(-W / 2, -m, 0.022f), P(W / 2, -m, 0.022f), P(W / 2, L + m * 0.5f, 0.022f),
-			        P(-W / 2, L + m * 0.5f, 0.022f), {1, 1, 1, 1});
-			sc.Quad(bb.Transform({-Wb / 2 + 0.02f, 0.02f, 0.016f}), bb.Transform({Wb / 2 - 0.02f, 0.02f, 0.016f}),
-			        bb.Transform({Wb / 2 - 0.02f, Hb - 0.02f, 0.016f}),
-			        bb.Transform({-Wb / 2 + 0.02f, Hb - 0.02f, 0.016f}), {1, 1, 1, 1});
+			sc.Quad(P(-W / 2, 0, 0.012f), P(W / 2, 0, 0.012f), P(W / 2, L, 0.012f), P(-W / 2, L, 0.012f),
+			        {1, 1, 1, 1});
+			sc.Quad(bb.Transform({-Ws / 2, 0, 0.008f}), bb.Transform({Ws / 2, 0, 0.008f}),
+			        bb.Transform({Ws / 2, Hs, 0.008f}), bb.Transform({-Ws / 2, Hs, 0.008f}), {1, 1, 1, 1});
 			sc.End();
 
 			TransformRange(first, world);
-			(void)firstItem;
 
 			S.GlowCenter = world.Transform(P(0, L * 0.5f, 0.05f));
 			S.GlowStrength = 1.0f;
@@ -2177,6 +2148,7 @@ namespace vr
 							pc.Params[0] = static_cast<float>(item.Mat);
 							pc.Params[1] = item.Emissive;
 							pc.Params[2] = item.Brightness;
+							pc.Params[3] = item.EdgeFade;
 							memcpy(pc.UvRect, item.UvRect, sizeof pc.UvRect);
 							vkl::vkCmdPushConstants(cmd, S.PipeLayout,
 							                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,

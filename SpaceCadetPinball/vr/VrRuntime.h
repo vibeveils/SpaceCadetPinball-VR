@@ -47,8 +47,14 @@ namespace vr
 	struct FrameLayout
 	{
 		float Board[4] = {0, 0, 1, 1};
-		float Sidebar[4] = {0, 0, 1, 1};
+		float Sidebar[4] = {0, 0, 1, 1};   // the score panel artwork, including its own frame
 		float Game[4] = {0, 0, 1, 1};
+
+		// The table artwork is pre-rendered in perspective. When set, the cabinet shows the playfield as a
+		// flat rectangle and asks this function where each table point lies in the frame image:
+		// s = 0 left edge .. 1 right edge, t = 0 front (flippers) .. 1 back; u, v = frame image UV.
+		void (*PlayfieldMap)(float s, float t, float* u, float* v) = nullptr;
+		float PlayfieldAspect = 0; // table length / width
 	};
 
 	struct Input

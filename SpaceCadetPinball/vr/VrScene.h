@@ -36,6 +36,7 @@ namespace vr
 		float UvRect[4] = {0, 0, 1, 1};
 		bool Blend = false;
 		float Brightness = 1.0f;
+		float EdgeFade = 1.0f; // darken the outer edge of screen quads (off for artwork with its own frame)
 	};
 
 	struct Color

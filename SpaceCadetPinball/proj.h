@@ -27,6 +27,9 @@ public:
 	static vector2i xform_to_2d(const vector3& vec);
 	static vector2i xform_to_2d(const vector2& vec);
 	static vector3 ReverseXForm(const vector2i& vec);
+	// Float-precision versions (screen pixels in the table bitmap), used by the VR view.
+	static vector2 xform_to_2d_f(const vector3& vec);
+	static vector3 ReverseXFormF(float x, float y);
 	static void recenter(float centerX, float centerY);
 	static uint16_t NormalizeDepth(float depth);
 private:

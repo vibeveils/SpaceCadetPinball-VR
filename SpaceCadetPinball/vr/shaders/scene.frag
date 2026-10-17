@@ -137,7 +137,7 @@ void main()
 		// Gentle falloff at the very edge so the panel sits inside its bezel.
 		vec2 e = min(vUv, 1.0 - vUv);
 		float edge = smoothstep(0.0, 0.012, min(e.x, e.y));
-		outColor = vec4(c * mix(0.35, 1.0, edge), 1.0);
+		outColor = vec4(c * mix(1.0, mix(0.35, 1.0, edge), pc.params.w), 1.0);
 		return;
 	}
 
