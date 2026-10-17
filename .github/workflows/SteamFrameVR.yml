@@ -1,0 +1,82 @@
+name: VR Builds (Steam Frame / Linux)
+
+# Builds the VR version for Linux x86_64 (SteamVR PCs, Steam Deck/SteamOS) and Linux arm64
+# (Steam Frame standalone) inside Valve's Steam Linux Runtime 3.0 "sniper" SDK, so the
+# binaries run under the "Steam Linux Runtime 3.0 (Sniper)" compatibility tool.
+#
+# Every push and pull request uploads the packages as workflow artifacts.
+# Pushing a tag like "v1.0.0" also publishes them on a GitHub release.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
+          - arch: arm64
+            # Native arm64 runner (free for public repositories).
+            runner: ubuntu-24.04-arm
+            image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk/arm64:latest
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and package
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash Platform/SteamFrame/build-linux.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceCadetPinball-VR-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
+          body: |
+            Space Cadet Pinball with VR support (OpenXR). Game data is not included:
+            copy the original Space Cadet files into the unpacked folder.
+
+            * `linux-arm64`: Steam Frame standalone. Upload with the SteamOS Devkit Client,
+              start command `run-vr.sh`, runtime "Steam Linux Runtime 3.0 ARM64 (Sniper)".
+            * `linux-x86_64`: Linux PCs with SteamVR (stream to the Frame), run `./run-vr.sh`.
+
+            See VR.md in the package for controls and details.
