@@ -292,12 +292,16 @@ int winmain::WinMain(LPCSTR lpCmdLine)
 		ImGui_ImplSDL2_InitForSDLRenderer(window, Renderer);
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
 
-		// Data search order: WD, executable path, user pref path, platform specific paths.
+		// Data search order: WD, WD/assets, executable path, executable path/assets, user pref path,
+		// platform specific paths. The "assets" folders keep the game files apart from the program files.
+		const std::string baseAssetsPath = std::string(basePath ? basePath : "") + "assets/";
 		std::vector<const char*> searchPaths
 		{
 			{
 				"",
+				"assets/",
 				basePath,
+				basePath ? baseAssetsPath.c_str() : nullptr,
 				prefPath
 			}
 		};
