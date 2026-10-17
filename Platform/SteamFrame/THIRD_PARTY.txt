@@ -1,0 +1,8 @@
+Space Cadet Pinball VR - bundled third-party components
+
+SpaceCadetPinball decompilation   MIT License   https://github.com/k4zmu2a/SpaceCadetPinball
+SDL2 / SDL2_mixer                 zlib License  https://libsdl.org  (provided by the Steam Runtime or the system)
+OpenXR loader                     Apache-2.0    https://github.com/KhronosGroup/OpenXR-SDK
+Dear ImGui                        MIT License   https://github.com/ocornut/imgui
+
+The original game data (PINBALL.DAT etc.) is not included and is not covered by these licenses.
