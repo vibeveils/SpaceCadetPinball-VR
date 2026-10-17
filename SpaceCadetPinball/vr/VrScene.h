@@ -37,6 +37,7 @@ namespace vr
 		bool Blend = false;
 		float Brightness = 1.0f;
 		float EdgeFade = 1.0f; // darken the outer edge of screen quads (off for artwork with its own frame)
+		bool Overlay = false;  // drawn last, on top of everything (menu panel, pointer)
 	};
 
 	struct Color

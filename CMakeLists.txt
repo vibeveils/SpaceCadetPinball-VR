@@ -1,35 +1,14 @@
-cmake_minimum_required(VERSION 3.0...3.5)
+# Space Cadet Pinball VR - Linux (x86_64 and arm64 / Steam Frame)
+cmake_minimum_required(VERSION 3.16)
 project(SpaceCadetPinball)
 
-set(CMAKE_CXX_STANDARD 11)
-
+set(CMAKE_CXX_STANDARD 14)
 
 if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/bin)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/CMakeModules")
-
-# On Windows, set paths to SDL-devel packages here
-if(WIN32)
-   list(APPEND SDL2_PATH "${CMAKE_CURRENT_LIST_DIR}/Libs/SDL2")
-   list(APPEND SDL2_MIXER_PATH "${CMAKE_CURRENT_LIST_DIR}/Libs/SDL2_mixer")
-endif()
-
-# Link mingw libs static
-if(MINGW)
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static")
-endif()
-
-if(APPLE)
-    set(MACOSX_RPATH)
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH true)
-    set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.11")
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
-    list(APPEND SDL2_PATH "${CMAKE_CURRENT_LIST_DIR}/Libs")
-    list(APPEND SDL2_MIXER_PATH "${CMAKE_CURRENT_LIST_DIR}/Libs")
-endif()
 
 # SDL2main is not needed
 set(SDL2_BUILDING_LIBRARY ON)
@@ -58,7 +37,8 @@ if(SCP_BUNDLE_SDL_MIXER)
         set(${_opt} ON CACHE BOOL "" FORCE)
     endforeach()
     FetchContent_Declare(sdl2_mixer
-        URL https://github.com/libsdl-org/SDL_mixer/archive/refs/tags/release-2.8.1.tar.gz)
+        URL https://github.com/libsdl-org/SDL_mixer/archive/refs/tags/release-2.8.1.tar.gz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
     set(_scp_build_shared ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_MakeAvailable(sdl2_mixer)
@@ -244,12 +224,6 @@ if(SCP_VR)
     )
 endif()
 
-# On Windows, include resource file with the icon
-if(WIN32)
-    set_source_files_properties(SpaceCadetPinball/SpaceCadetPinball.rc LANGUAGE RC)
-    list(APPEND SOURCE_FILES SpaceCadetPinball/SpaceCadetPinball.rc)
-endif(WIN32)
-
 add_executable(SpaceCadetPinball ${SOURCE_FILES})
 
 # Skip pch on foreign code
@@ -265,12 +239,7 @@ set_source_files_properties(
         PROPERTIES SKIP_PRECOMPILE_HEADERS 1
 )
 
-if(${CMAKE_VERSION} VERSION_GREATER "3.16.0" OR ${CMAKE_VERSION} VERSION_EQUAL "3.16.0")
-    target_precompile_headers(SpaceCadetPinball
-            PUBLIC
-            SpaceCadetPinball/pch.h
-            )
-endif()
+target_precompile_headers(SpaceCadetPinball PUBLIC SpaceCadetPinball/pch.h)
 
 target_link_libraries(SpaceCadetPinball ${SDL2_LIBRARY} ${SDL2_MIXER_LIBRARY})
 
@@ -283,9 +252,6 @@ if(SCP_VR)
         PROPERTIES SKIP_PRECOMPILE_HEADERS 1
     )
     target_compile_definitions(SpaceCadetPinball PRIVATE SCP_VR=1)
-    if(NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 14)
-        set_property(TARGET SpaceCadetPinball PROPERTY CXX_STANDARD 14)
-    endif()
 
     # Vulkan headers only (no import library needed).
     find_path(VULKAN_HEADERS_DIR vulkan/vulkan.h HINTS $ENV{VULKAN_SDK}/include)
@@ -310,7 +276,8 @@ if(SCP_VR)
             # Bundle jsoncpp into the loader so the shipped libopenxr_loader.so.1 has no extra dependencies.
             set(BUILD_WITH_SYSTEM_JSONCPP OFF CACHE INTERNAL "")
             FetchContent_Declare(openxr_sdk
-                URL https://github.com/KhronosGroup/OpenXR-SDK/archive/refs/tags/release-1.1.65.tar.gz)
+                URL https://github.com/KhronosGroup/OpenXR-SDK/archive/refs/tags/release-1.1.65.tar.gz
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
             FetchContent_MakeAvailable(openxr_sdk)
             target_link_libraries(SpaceCadetPinball openxr_loader)
             target_include_directories(SpaceCadetPinball PRIVATE ${openxr_sdk_SOURCE_DIR}/include ${openxr_sdk_BINARY_DIR}/include)
@@ -319,19 +286,7 @@ if(SCP_VR)
         endif()
     endif()
 
-    if(UNIX)
-        target_link_libraries(SpaceCadetPinball ${CMAKE_DL_LIBS})
-        # Look for bundled libraries (OpenXR loader, SDL2) next to the executable first.
-        if(NOT APPLE)
-            set_target_properties(SpaceCadetPinball PROPERTIES
-                BUILD_RPATH "\$ORIGIN/lib;\$ORIGIN"
-                INSTALL_RPATH "\$ORIGIN/lib;\$ORIGIN")
-            if(CMAKE_CROSSCOMPILING OR SCP_PORTABLE)
-                # Cross/packaged builds are packaged with their libraries; don't leak host paths.
-                set_target_properties(SpaceCadetPinball PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
-            endif()
-        endif()
-    endif()
+    target_link_libraries(SpaceCadetPinball ${CMAKE_DL_LIBS})
 
     # Self-test that renders a synthetic table without game data (handy on a new headset/runtime).
     add_executable(SpaceCadetPinballVRTest
@@ -339,45 +294,22 @@ if(SCP_VR)
         SpaceCadetPinball/vr/VrRuntime.cpp
         SpaceCadetPinball/vr/VrScene.cpp
         SpaceCadetPinball/vr/vk_loader.cpp)
-    set_property(TARGET SpaceCadetPinballVRTest PROPERTY CXX_STANDARD 14)
     target_include_directories(SpaceCadetPinballVRTest PRIVATE ${VULKAN_HEADERS_DIR})
     get_target_property(_scp_inc SpaceCadetPinball INCLUDE_DIRECTORIES)
     get_target_property(_scp_libs SpaceCadetPinball LINK_LIBRARIES)
     target_include_directories(SpaceCadetPinballVRTest PRIVATE ${_scp_inc})
     target_link_libraries(SpaceCadetPinballVRTest ${_scp_libs})
-    if(UNIX AND NOT APPLE)
-        set_target_properties(SpaceCadetPinballVRTest PROPERTIES BUILD_RPATH "\$ORIGIN/lib;\$ORIGIN"
+endif()
+
+# Look for bundled libraries (OpenXR loader) in lib/ next to the executable first.
+# Packaged and cross-compiled builds use only these paths, so no build machine paths leak in.
+foreach(_target SpaceCadetPinball SpaceCadetPinballVRTest)
+    if(TARGET ${_target})
+        set_target_properties(${_target} PROPERTIES
+            BUILD_RPATH "\$ORIGIN/lib;\$ORIGIN"
             INSTALL_RPATH "\$ORIGIN/lib;\$ORIGIN")
         if(CMAKE_CROSSCOMPILING OR SCP_PORTABLE)
-            set_target_properties(SpaceCadetPinballVRTest PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
+            set_target_properties(${_target} PROPERTIES BUILD_WITH_INSTALL_RPATH TRUE)
         endif()
     endif()
-endif()
-
-# On Windows, copy DLL to output
-if(WIN32)
-    list(GET SDL2_LIBRARY -1 SDL2_DLL_PATH)
-    list(GET SDL2_MIXER_LIBRARY -1 SDL2_MIXER_DLL_PATH)
-    get_filename_component(SDL2_DLL_PATH ${SDL2_DLL_PATH} DIRECTORY)
-    get_filename_component(SDL2_MIXER_DLL_PATH ${SDL2_MIXER_DLL_PATH} DIRECTORY)
-    if(MINGW)
-        string(REGEX REPLACE "lib$" "bin" SDL2_DLL_PATH ${SDL2_DLL_PATH})
-        string(REGEX REPLACE "lib$" "bin" SDL2_MIXER_DLL_PATH ${SDL2_MIXER_DLL_PATH})
-    endif()
-    message(STATUS "copy paths='${SDL2_DLL_PATH}' '${SDL2_MIXER_DLL_PATH}'") 
-    add_custom_command(TARGET SpaceCadetPinball POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_DLL_PATH}/SDL2.dll" $<TARGET_FILE_DIR:SpaceCadetPinball>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${SDL2_MIXER_DLL_PATH}/SDL2_mixer.dll" $<TARGET_FILE_DIR:SpaceCadetPinball>
-        )
-endif()
-
-if(UNIX AND NOT APPLE)
-	include(GNUInstallDirs)
-	install(TARGETS "${PROJECT_NAME}" RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-	install(FILES "${CMAKE_SOURCE_DIR}/Platform/Linux/${PROJECT_NAME}.desktop" DESTINATION "share/applications")
-	install(FILES "${CMAKE_SOURCE_DIR}/Platform/Linux/${PROJECT_NAME}.metainfo.xml" DESTINATION "share/metainfo")
-	foreach(S 16 32 48 128 192)
-		install(FILES "${CMAKE_SOURCE_DIR}/${PROJECT_NAME}/Icon_${S}x${S}.png" DESTINATION
-			"share/icons/hicolor/${S}x${S}/apps" RENAME "${PROJECT_NAME}.png")
-	endforeach(S)
-endif()
+endforeach()

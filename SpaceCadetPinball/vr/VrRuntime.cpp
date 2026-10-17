@@ -126,7 +126,7 @@ namespace vr
 			VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
 			VkDescriptorPool DescPool = VK_NULL_HANDLE;
 			VkPipelineLayout PipeLayout = VK_NULL_HANDLE;
-			VkPipeline PipeOpaque = VK_NULL_HANDLE, PipeBlend = VK_NULL_HANDLE;
+			VkPipeline PipeOpaque = VK_NULL_HANDLE, PipeBlend = VK_NULL_HANDLE, PipeOverlay = VK_NULL_HANDLE;
 			VkSampler Sampler = VK_NULL_HANDLE;
 			VkFormat ColorFormat = VK_FORMAT_UNDEFINED;
 			VkFormat DepthFormat = VK_FORMAT_UNDEFINED;
@@ -147,6 +147,7 @@ namespace vr
 			XrAction Move = XR_NULL_HANDLE, Look = XR_NULL_HANDLE;
 			XrAction Pause = XR_NULL_HANDLE, Menu = XR_NULL_HANDLE, NewGame = XR_NULL_HANDLE;
 			XrAction ViewToggle = XR_NULL_HANDLE, Recenter = XR_NULL_HANDLE, Back = XR_NULL_HANDLE;
+			XrAction Grab = XR_NULL_HANDLE;
 			XrAction AimPose = XR_NULL_HANDLE, GripPose = XR_NULL_HANDLE, HapticOut = XR_NULL_HANDLE;
 			XrPath HandPath[2] = {XR_NULL_PATH, XR_NULL_PATH};
 			XrSpace AimSpace[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
@@ -170,8 +171,28 @@ namespace vr
 			float FloorY = 0;
 			Vec3 Shake{}, ShakeVel{};
 
+			// Grabbable cabinet controls, in world space (updated each frame when the cabinet is built).
+			bool ControlsValid = false;
+			Vec3 FlipButton[2], FlipButtonOut[2];  // button centre, outward direction
+			Vec3 PlungerRest, PlungerAxis;          // knob at rest, pull direction (towards the player)
+			float PlungerTravel = 0.07f;
+			bool GrabHeld[2] = {false, false};
+			int HandFlip[2] = {-1, -1};          // which flipper button each hand holds
+			bool FlipPressed[2] = {false, false}; // for the button animation
+			int PlungerHand = -1;
+			float PlungerGrabOffset = 0;
+			float PlungerPull = 0;
+			float PlungerVisual = 0;               // knob position, springs back after release
+
+			// Two-handed table move while paused.
+			bool Moving = false;
+			Vec3 MoveStartMid, MoveStartAnchor;
+			float MoveStartAngle = 0, MoveStartYaw = 0, MoveStartDist = 1, MoveStartWidth = 0;
+
 			int LastFrameW = 1200, LastFrameH = 880;
 			float LastGameRect[4] = {0, 0.027f, 1, 0.973f};
+			// The frame texture is two frames tall: top = frame with menus, bottom = game only (when sent).
+			bool FrameDual = false;
 			Panel UiPanel;
 			bool PointerHit = false;
 			Vec3 PointerHitPos{};
@@ -839,6 +860,13 @@ namespace vr
 				cba.alphaBlendOp = VK_BLEND_OP_ADD;
 				r = vkl::vkCreateGraphicsPipelines(S.Device, VK_NULL_HANDLE, 1, &gp, nullptr, &S.PipeBlend);
 			}
+			if (r == VK_SUCCESS)
+			{
+				// Overlay: menu panel and pointer always on top, so the cabinet can never clip them.
+				ds.depthTestEnable = VK_FALSE;
+				ds.depthWriteEnable = VK_FALSE;
+				r = vkl::vkCreateGraphicsPipelines(S.Device, VK_NULL_HANDLE, 1, &gp, nullptr, &S.PipeOverlay);
+			}
 			vkl::vkDestroyShaderModule(S.Device, vs, nullptr);
 			vkl::vkDestroyShaderModule(S.Device, fs, nullptr);
 			VK_TRY(r);
@@ -976,6 +1004,7 @@ namespace vr
 			ok &= make(S.ViewToggle, XR_ACTION_TYPE_BOOLEAN_INPUT, "toggle_view", "Cabinet / Theater", false);
 			ok &= make(S.Recenter, XR_ACTION_TYPE_BOOLEAN_INPUT, "recenter", "Recenter", false);
 			ok &= make(S.Back, XR_ACTION_TYPE_BOOLEAN_INPUT, "back", "Close Menu", false);
+			ok &= make(S.Grab, XR_ACTION_TYPE_BOOLEAN_INPUT, "grab", "Grab (flipper buttons, plunger, move table)", true);
 			ok &= make(S.AimPose, XR_ACTION_TYPE_POSE_INPUT, "aim_pose", "Aim", true);
 			ok &= make(S.GripPose, XR_ACTION_TYPE_POSE_INPUT, "grip_pose", "Grip", true);
 			ok &= make(S.HapticOut, XR_ACTION_TYPE_VIBRATION_OUTPUT, "haptic", "Haptics", true);
@@ -1002,6 +1031,10 @@ namespace vr
 					sb.push_back({S.AimPose, Path((h + "/input/aim/pose").c_str())});
 					sb.push_back({S.GripPose, Path((h + "/input/grip/pose").c_str())});
 					sb.push_back({S.HapticOut, Path((h + "/output/haptic").c_str())});
+					if (strstr(profile, "vive_controller"))
+						sb.push_back({S.Grab, Path((h + "/input/squeeze/click").c_str())});
+					else if (!strstr(profile, "simple_controller"))
+						sb.push_back({S.Grab, Path((h + "/input/squeeze/value").c_str())});
 				}
 				XrInteractionProfileSuggestedBinding ps{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
 				ps.interactionProfile = Path(profile);
@@ -1107,6 +1140,17 @@ namespace vr
 			}
 			if (changed)
 				*changed = st.changedSinceLastSync == XR_TRUE;
+			return st.currentState == XR_TRUE;
+		}
+
+		bool GetBoolHand(XrAction action, int hand)
+		{
+			XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+			gi.action = action;
+			gi.subactionPath = S.HandPath[hand];
+			XrActionStateBoolean st{XR_TYPE_ACTION_STATE_BOOLEAN};
+			if (XR_FAILED(xrGetActionStateBoolean(S.Session, &gi, &st)) || !st.isActive)
+				return false;
 			return st.currentState == XR_TRUE;
 		}
 
@@ -1257,10 +1301,18 @@ namespace vr
 			}
 		}
 
-		void SetUv(DrawItem& item, const float (&r)[4])
+		// Frame UV -> texture UV. game = the cabinet's screens, which use the menu-free copy when available.
+		float TexV(float v, bool game)
 		{
-			for (int i = 0; i < 4; ++i)
-				item.UvRect[i] = r[i];
+			return (game && S.FrameDual ? 0.5f : 0.0f) + v * 0.5f;
+		}
+
+		void SetUv(DrawItem& item, const float (&r)[4], bool game)
+		{
+			item.UvRect[0] = r[0];
+			item.UvRect[1] = TexV(r[1], game);
+			item.UvRect[2] = r[2];
+			item.UvRect[3] = TexV(r[3], game);
 		}
 
 		void BuildEnvironmentGeometry();
@@ -1369,15 +1421,45 @@ namespace vr
 				sc.Box(id, {0, dc, body[0].z + 0.006f}, {0.11f * scale, dh, 0.006f}, BlackChrome);
 			}
 
-			// --- backbox: a shell exactly the size of the score panel artwork
-			const float Hs = W * 1.0f;
-			const float Ws = Hs * sideAspect;
+			// --- backbox: as wide as the table, height from the score panel artwork's aspect ratio
+			const float Ws = W;
+			const float Hs = Ws / std::max(sideAspect, 0.1f);
 			const float Db = 0.15f * scale;
 			const float back = Deg(9.0f);
 			Pose bb;
 			bb.orientation = Quat::AxisAngle({1, 0, 0}, -back);
 			bb.position = P(0, L, -0.004f);
 			sc.Box(bb, {0, Hs / 2, -Db / 2}, {Ws / 2, Hs / 2, Db / 2}, NavyPaint);
+
+			// --- physical controls: flipper buttons on the sides, plunger at the front right
+			const Color ButtonRing{0.10f, 0.10f, 0.12f, 0.85f};
+			const float btnT = std::min(0.13f * scale, L * 0.3f);   // distance up the table from the front
+			const float btnDrop = std::min(0.07f * scale, (frontTop - yb) * 0.5f);
+			Vec3 btnLocal[2], btnOut[2];
+			for (int side = 0; side < 2; ++side)
+			{
+				const float sx = side == 0 ? -1.0f : 1.0f;
+				Vec3 edge = P(sx * W / 2, btnT, -0.004f);
+				btnLocal[side] = Vec3{edge.x + sx * 0.010f, edge.y - btnDrop, edge.z};
+				btnOut[side] = Vec3{sx, 0, 0};
+				Pose id;
+				sc.Box(id, btnLocal[side] - Vec3{sx * 0.005f, 0, 0}, {0.005f, 0.024f, 0.024f}, ButtonRing);
+			}
+			const float faceZ = body[0].z;
+			const Vec3 plungerBase{W / 2 - 0.07f * scale, frontTop - std::min(0.08f * scale, (frontTop - yb) * 0.45f),
+			                       faceZ};
+			const float rodRest = 0.055f * scale;
+			S.PlungerTravel = 0.07f * scale;
+			const float knobZ = rodRest + S.PlungerVisual * S.PlungerTravel;
+			{
+				Pose id;
+				// housing, rod and knob
+				sc.Box(id, plungerBase + Vec3{0, 0, 0.006f}, {0.022f, 0.022f, 0.006f}, Chrome);
+				sc.Box(id, plungerBase + Vec3{0, 0, (0.012f + knobZ) * 0.5f}, {0.0045f, 0.0045f, (knobZ - 0.012f) * 0.5f},
+				       Chrome);
+				sc.Sphere(plungerBase + Vec3{0, 0, knobZ + 0.012f}, 0.017f * scale, 20, 10,
+				          {0.75f, 0.06f, 0.05f, 0.8f}, false);
+			}
 
 			// --- lights on the cabinet body (not around the artwork)
 			sc.Begin(Material::Unlit, 1.6f);
@@ -1388,6 +1470,15 @@ namespace vr
 			};
 			stripe(body[4], body[0], 0.02f, 0.03f, -0.002f, NeonMagenta);  // left bottom
 			stripe(body[1], body[5], 0.02f, 0.03f, 0.002f, NeonMagenta);   // right bottom
+			for (int side = 0; side < 2; ++side)
+			{
+				// flipper button caps light up while pressed
+				const float sx = side == 0 ? -1.0f : 1.0f;
+				const float push = S.FlipPressed[side] ? 0.004f : 0.0f;
+				Vec3 c = btnLocal[side] + Vec3{sx * (0.006f - push), 0, 0};
+				sc.Disc(c, Vec3{0, 0, sx}, Vec3{0, 1, 0}, 0.0f, 0.019f, 24,
+				        S.FlipPressed[side] ? Color{1.0f, 0.75f, 0.2f, 1} : Color{0.55f, 0.08f, 0.06f, 1});
+			}
 			{
 				Vec3 a = body[0], b = body[1];
 				sc.Quad(Vec3{a.x, a.y + 0.02f, a.z + 0.002f}, Vec3{b.x, b.y + 0.02f, b.z + 0.002f},
@@ -1415,7 +1506,7 @@ namespace vr
 					{
 						float u, v;
 						layout.PlayfieldMap(static_cast<float>(i) / nx, static_cast<float>(j) / ny, &u, &v);
-						uv[j * (nx + 1) + i] = {u, v};
+						uv[j * (nx + 1) + i] = {u, TexV(v, true)};
 					}
 				const Vec3 n = Normalize(Cross(P(1, 0, 0) - P(0, 0, 0), P(0, 1, 0) - P(0, 0, 0)));
 				auto pos = [&](int i, int j) { return P(-W / 2 + W * i / nx, L * j / ny, 0); };
@@ -1430,11 +1521,11 @@ namespace vr
 			}
 			else
 			{
-				SetUv(play, layout.Board);
+				SetUv(play, layout.Board, true);
 				sc.Quad(P(-W / 2, 0, 0), P(W / 2, 0, 0), P(W / 2, L, 0), P(-W / 2, L, 0), {1, 1, 1, 1});
 			}
 			auto& side = sc.Begin(Material::Screen);
-			SetUv(side, layout.Sidebar);
+			SetUv(side, layout.Sidebar, true);
 			side.Brightness = screenLevel;
 			side.EdgeFade = 0;
 			sc.Quad(bb.Transform({-Ws / 2, 0, 0.001f}), bb.Transform({Ws / 2, 0, 0.001f}),
@@ -1450,13 +1541,23 @@ namespace vr
 
 			TransformRange(first, world);
 
+			for (int side = 0; side < 2; ++side)
+			{
+				S.FlipButton[side] = world.Transform(btnLocal[side]);
+				S.FlipButtonOut[side] = world.TransformDir(btnOut[side]);
+			}
+			S.PlungerRest = world.Transform(plungerBase + Vec3{0, 0, rodRest + 0.012f});
+			S.PlungerAxis = world.TransformDir({0, 0, 1});
+			S.ControlsValid = true;
+
 			S.GlowCenter = world.Transform(P(0, L * 0.5f, 0.05f));
 			S.GlowStrength = 1.0f;
 		}
 
-		void BuildPanel(const Panel& p, const float (&uv)[4], bool bezel)
+		void BuildPanel(const Panel& p, const float (&uv)[4], bool bezel, bool overlay = false)
 		{
 			auto& sc = S.Scene;
+			const size_t firstItem = sc.Items.size();
 			Vec3 n = Normalize(Cross(p.Right, p.Up));
 			auto corner = [&](float sx, float sy, float off, float grow)
 			{
@@ -1481,10 +1582,13 @@ namespace vr
 				        corner(-1, 1, 0.001f, g), NeonCyan);
 			}
 			auto& item = sc.Begin(Material::Screen);
-			SetUv(item, uv);
+			SetUv(item, uv, false);
 			sc.Quad(corner(-1, -1, 0.002f, 0), corner(1, -1, 0.002f, 0), corner(1, 1, 0.002f, 0),
 			        corner(-1, 1, 0.002f, 0), {1, 1, 1, 1});
 			sc.End();
+			if (overlay)
+				for (size_t i = firstItem; i < sc.Items.size(); ++i)
+					sc.Items[i].Overlay = true;
 		}
 
 		void BuildControllers(bool uiVisible)
@@ -1508,12 +1612,12 @@ namespace vr
 			const Pose& aim = S.Aim[S.PointerHand];
 			Vec3 dir = aim.orientation.Rotate({0, 0, -1});
 			Vec3 end = S.PointerHit ? S.PointerHitPos : aim.position + dir * 2.5f;
-			sc.Begin(Material::Beam, 1.8f, true);
+			sc.Begin(Material::Beam, 1.8f, true).Overlay = true;
 			sc.Beam(aim.position + dir * 0.02f, end, 0.007f, {0.35f, 0.85f, 1.0f, 0.85f});
 			if (S.PointerHit)
 			{
 				Vec3 n = Normalize(Cross(S.UiPanel.Right, S.UiPanel.Up));
-				sc.Begin(Material::Unlit, 2.0f);
+				sc.Begin(Material::Unlit, 2.0f).Overlay = true;
 				sc.Disc(S.PointerHitPos + n * 0.004f, S.UiPanel.Right, S.UiPanel.Up, 0.0f, 0.006f, 16,
 				        {0.6f, 0.95f, 1.0f, 1.0f});
 			}
@@ -1529,10 +1633,11 @@ namespace vr
 			{
 				BuildCabinet(layout, uiVisible);
 				if (uiVisible)
-					BuildPanel(S.UiPanel, full, true);
+					BuildPanel(S.UiPanel, full, true, true);
 			}
 			else
 			{
+				S.ControlsValid = false;
 				BuildPanel(S.UiPanel, uiVisible ? full : layout.Game, true);
 				S.GlowCenter = S.UiPanel.Center;
 				S.GlowStrength = 2.5f;
@@ -1607,6 +1712,7 @@ namespace vr
 				if (S.Sampler) vkl::vkDestroySampler(S.Device, S.Sampler, nullptr);
 				if (S.PipeOpaque) vkl::vkDestroyPipeline(S.Device, S.PipeOpaque, nullptr);
 				if (S.PipeBlend) vkl::vkDestroyPipeline(S.Device, S.PipeBlend, nullptr);
+				if (S.PipeOverlay) vkl::vkDestroyPipeline(S.Device, S.PipeOverlay, nullptr);
 				if (S.PipeLayout) vkl::vkDestroyPipelineLayout(S.Device, S.PipeLayout, nullptr);
 				if (S.DescPool) vkl::vkDestroyDescriptorPool(S.Device, S.DescPool, nullptr);
 				if (S.SetLayout) vkl::vkDestroyDescriptorSetLayout(S.Device, S.SetLayout, nullptr);
@@ -1768,7 +1874,7 @@ namespace vr
 		return true;
 	}
 
-	void SyncInput(Input& out, bool uiVisible)
+	void SyncInput(Input& out, bool uiVisible, bool paused)
 	{
 		out = Input{};
 		if (!S.FrameBegun)
@@ -1819,8 +1925,17 @@ namespace vr
 		}
 
 		S.PointerHit = false;
+		// The plunger knob springs back to rest once let go.
+		if (S.PlungerHand < 0)
+			S.PlungerVisual = std::max(0.0f, S.PlungerVisual - dt * 12.0f);
 		if (!focused)
+		{
+			S.PlungerHand = -1;
+			S.HandFlip[0] = S.HandFlip[1] = -1;
+			S.Moving = false;
+			S.FlipPressed[0] = S.FlipPressed[1] = false;
 			return;
+		}
 
 		bool flipL = GetBool(S.FlipL), flipR = GetBool(S.FlipR);
 		bool flipLChanged = false, flipRChanged = false;
@@ -1870,8 +1985,101 @@ namespace vr
 			S.NewGameFired = false;
 		}
 
+		// --- grips
+		bool grab[2], grabPressed[2];
+		for (int hand = 0; hand < 2; ++hand)
+		{
+			grab[hand] = GetBoolHand(S.Grab, hand) && S.GripValid[hand];
+			grabPressed[hand] = grab[hand] && !S.GrabHeld[hand];
+			S.GrabHeld[hand] = grab[hand];
+		}
+
+		// While paused (or in a menu), grabbing with both hands moves and turns the table or screen.
+		const bool canMove = paused || uiVisible;
+		if (canMove && grab[0] && grab[1])
+		{
+			Vec3 a = S.Grip[0].position, b = S.Grip[1].position;
+			Vec3 mid = (a + b) * 0.5f, d = b - a;
+			float angle = std::atan2(-d.z, d.x);
+			float dist = std::max(0.05f, Length(Vec3{d.x, 0, d.z}));
+			if (!S.Moving)
+			{
+				S.Moving = true;
+				S.MoveStartMid = mid;
+				S.MoveStartAnchor = S.AnchorPos;
+				S.MoveStartAngle = angle;
+				S.MoveStartYaw = S.AnchorYaw;
+				S.MoveStartDist = dist;
+				S.MoveStartWidth = S.Cfg.TheaterWidth;
+				HapticBoth(0.35f, 0.04f);
+			}
+			float dYaw = angle - S.MoveStartAngle;
+			Quat q = Quat::AxisAngle({0, 1, 0}, dYaw);
+			S.AnchorYaw = S.MoveStartYaw + dYaw;
+			S.AnchorPos = mid + q.Rotate(S.MoveStartAnchor - S.MoveStartMid);
+			if (S.Cfg.Mode == ViewMode::Theater)
+				S.Cfg.TheaterWidth = Clampf(S.MoveStartWidth * dist / S.MoveStartDist, 1.0f, 6.0f);
+			ComputePanel(uiVisible);
+		}
+		else if (S.Moving)
+		{
+			S.Moving = false;
+			HapticBoth(0.2f, 0.03f);
+		}
+
+		// While playing, grips grab the cabinet's flipper buttons and plunger.
+		const bool canGrab = !canMove && S.ControlsValid && S.Cfg.Mode == ViewMode::Cabinet;
+		for (int hand = 0; hand < 2; ++hand)
+		{
+			if (!grab[hand] || !canGrab)
+			{
+				if (S.PlungerHand == hand)
+				{
+					S.PlungerHand = -1;
+					if (S.PlungerPull > 0.05f)
+						Haptic(static_cast<Hand>(hand), 0.4f + 0.6f * S.PlungerPull, 0.05f);
+				}
+				S.HandFlip[hand] = -1;
+				continue;
+			}
+			const Vec3 p = S.Grip[hand].position;
+			if (grabPressed[hand])
+			{
+				const Vec3 knob = S.PlungerRest + S.PlungerAxis * (S.PlungerVisual * S.PlungerTravel);
+				int nearest = Length(p - S.FlipButton[0]) < Length(p - S.FlipButton[1]) ? 0 : 1;
+				if (S.PlungerHand < 0 && Length(p - knob) < 0.09f)
+				{
+					S.PlungerHand = hand;
+					S.PlungerGrabOffset = Dot(p - S.PlungerRest, S.PlungerAxis) - S.PlungerVisual * S.PlungerTravel;
+					Haptic(static_cast<Hand>(hand), 0.3f, 0.02f);
+				}
+				else if (Length(p - S.FlipButton[nearest]) < 0.12f)
+				{
+					S.HandFlip[hand] = nearest;
+				}
+			}
+			if (S.PlungerHand == hand)
+			{
+				float pull = (Dot(p - S.PlungerRest, S.PlungerAxis) - S.PlungerGrabOffset) / S.PlungerTravel;
+				pull = Clampf(pull, 0.0f, 1.0f);
+				// a faint tick as the spring compresses
+				if (static_cast<int>(pull * 8) != static_cast<int>(S.PlungerPull * 8))
+					Haptic(static_cast<Hand>(hand), 0.12f + 0.3f * pull, 0.01f);
+				S.PlungerPull = pull;
+				S.PlungerVisual = pull;
+			}
+		}
+		if (S.PlungerHand >= 0)
+		{
+			out.PlungerGrabbed = true;
+			out.PlungerPull = S.PlungerPull;
+		}
+		else
+			S.PlungerPull = 0;
+
 		if (uiVisible)
 		{
+			S.FlipPressed[0] = S.FlipPressed[1] = false;
 			// Laser pointer drives the game's menus. Either trigger clicks; the last one used aims.
 			if (flipLChanged)
 				S.PointerHand = 0;
@@ -1893,9 +2101,11 @@ namespace vr
 			return;
 		}
 
-		out.FlipperLeft = flipL;
-		out.FlipperRight = flipR;
+		out.FlipperLeft = flipL || S.HandFlip[0] == 0 || S.HandFlip[1] == 0;
+		out.FlipperRight = flipR || S.HandFlip[0] == 1 || S.HandFlip[1] == 1;
 		out.Plunger = GetBool(S.Plunger);
+		S.FlipPressed[0] = out.FlipperLeft;
+		S.FlipPressed[1] = out.FlipperRight;
 
 		// Left stick: flick to nudge, with hysteresis.
 		auto hyst = [](bool& state, float v)
@@ -2000,20 +2210,28 @@ namespace vr
 				S.LastFrameH = image.Height;
 				memcpy(S.LastGameRect, layout.Game, sizeof S.LastGameRect);
 			}
-			bool texOk = EnsureFrameTexture(f, w, h);
+			const bool dual = haveImage && image.GamePixels;
+			S.FrameDual = dual;
+			bool texOk = EnsureFrameTexture(f, w, h * 2);
 			if (texOk)
 			{
 				auto dst = static_cast<uint8_t*>(f.StagingPtr);
 				if (haveImage)
 				{
 					// Alpha is ignored by the screen shader, so a straight copy is enough.
-					auto src = static_cast<const uint8_t*>(image.Pixels);
 					const size_t rowBytes = static_cast<size_t>(w) * 4;
-					if (static_cast<size_t>(image.Pitch) == rowBytes)
-						memcpy(dst, src, rowBytes * h);
-					else
-						for (int y = 0; y < h; ++y)
-							memcpy(dst + y * rowBytes, src + static_cast<size_t>(y) * image.Pitch, rowBytes);
+					auto copyFrame = [&](const void* pixels, uint8_t* out)
+					{
+						auto src = static_cast<const uint8_t*>(pixels);
+						if (static_cast<size_t>(image.Pitch) == rowBytes)
+							memcpy(out, src, rowBytes * h);
+						else
+							for (int y = 0; y < h; ++y)
+								memcpy(out + y * rowBytes, src + static_cast<size_t>(y) * image.Pitch, rowBytes);
+					};
+					copyFrame(image.Pixels, dst);
+					if (dual)
+						copyFrame(image.GamePixels, dst + rowBytes * h);
 				}
 				else
 					memset(dst, 0, static_cast<size_t>(f.StagingSize));
@@ -2060,9 +2278,9 @@ namespace vr
 				        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 				VkBufferImageCopy copy{};
 				copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-				copy.imageExtent = {static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1};
+				copy.imageExtent = {static_cast<uint32_t>(w), static_cast<uint32_t>(dual ? h * 2 : h), 1};
 				vkl::vkCmdCopyBufferToImage(cmd, f.Staging, f.Tex, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-				int mw = w, mh = h;
+				int mw = w, mh = h * 2;
 				for (uint32_t mip = 1; mip < f.Mips; ++mip)
 				{
 					Barrier(cmd, f.Tex, mip - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -2137,13 +2355,14 @@ namespace vr
 					pc.Glow[2] = S.GlowCenter.z;
 					pc.Glow[3] = S.GlowStrength;
 
-					for (int pass = 0; pass < 2; ++pass)
+					for (int pass = 0; pass < 3; ++pass)
 					{
 						vkl::vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-						                       pass == 0 ? S.PipeOpaque : S.PipeBlend);
+						                       pass == 0 ? S.PipeOpaque : pass == 1 ? S.PipeBlend : S.PipeOverlay);
 						for (auto& item : S.Scene.Items)
 						{
-							if (item.Blend != (pass == 1) || item.Count == 0)
+							const int itemPass = item.Overlay ? 2 : item.Blend ? 1 : 0;
+							if (itemPass != pass || item.Count == 0)
 								continue;
 							pc.Params[0] = static_cast<float>(item.Mat);
 							pc.Params[1] = item.Emissive;

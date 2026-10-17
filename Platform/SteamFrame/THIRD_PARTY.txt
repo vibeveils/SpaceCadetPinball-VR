@@ -1,8 +1,17 @@
-Space Cadet Pinball VR - bundled third-party components
+Space Cadet Pinball VR - third-party components
 
-SpaceCadetPinball decompilation   MIT License   https://github.com/k4zmu2a/SpaceCadetPinball
-SDL2 / SDL2_mixer                 zlib License  https://libsdl.org  (provided by the Steam Runtime or the system)
-OpenXR loader                     Apache-2.0    https://github.com/KhronosGroup/OpenXR-SDK
-Dear ImGui                        MIT License   https://github.com/ocornut/imgui
+Built into the SpaceCadetPinball executable:
+  SpaceCadetPinball decompilation  MIT              https://github.com/k4zmu2a/SpaceCadetPinball
+  Dear ImGui                       MIT              https://github.com/ocornut/imgui
+  SDL2_mixer (packaged builds)     zlib             https://github.com/libsdl-org/SDL_mixer
+    including Timidity             Artistic License https://github.com/libsdl-org/SDL_mixer/tree/main/src/codecs/timidity
 
-The original game data (PINBALL.DAT etc.) is not included and is not covered by these licenses.
+Shipped in lib/:
+  OpenXR loader                    Apache-2.0       https://github.com/KhronosGroup/OpenXR-SDK
+    including JsonCpp              MIT / public domain
+
+Used from the system or the Steam Runtime (not shipped):
+  SDL2                             zlib             https://libsdl.org
+  Vulkan loader                    Apache-2.0       https://github.com/KhronosGroup/Vulkan-Loader
+
+The original game data (PINBALL.DAT, sounds, music) is not included and is not covered by these licences.

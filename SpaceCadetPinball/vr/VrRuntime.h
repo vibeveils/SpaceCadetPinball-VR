@@ -41,6 +41,9 @@ namespace vr
 		int Width = 0;
 		int Height = 0;
 		int Pitch = 0;
+		// Optional: the same frame without menus/dialogs (same size and pitch). The cabinet's screens show
+		// this one, so menus only appear on the floating panel.
+		const void* GamePixels = nullptr;
 	};
 
 	// Normalised rectangles (u0, v0, u1, v1) inside the frame image.
@@ -66,6 +69,10 @@ namespace vr
 		bool NudgeLeft = false;
 		bool NudgeRight = false;
 		bool NudgeUp = false;
+
+		// Physical plunger: 0..1 while the knob is grabbed and pulled back, negative otherwise.
+		float PlungerPull = -1.0f;
+		bool PlungerGrabbed = false;
 
 		// One-shot events for this frame.
 		bool PausePressed = false;
@@ -93,7 +100,8 @@ namespace vr
 
 	// Blocks until the runtime wants the next frame. Returns false if no frame was started.
 	bool BeginFrame();
-	void SyncInput(Input& out, bool uiPanelVisible);
+	// paused: the game is paused, so both grips move the table instead of grabbing its controls.
+	void SyncInput(Input& out, bool uiPanelVisible, bool paused = false);
 	void EndFrame(const FrameImage& image, const FrameLayout& layout, bool uiPanelVisible);
 
 	void Haptic(Hand hand, float amplitude, float seconds);
