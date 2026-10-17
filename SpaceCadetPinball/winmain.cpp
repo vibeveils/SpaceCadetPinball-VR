@@ -12,6 +12,7 @@
 #include "translations.h"
 #include "font_selection.h"
 #include "TPinballTable.h"
+#include "TPlunger.h"
 #include "proj.h"
 #include <cfloat>
 
@@ -1654,6 +1655,8 @@ void winmain::VrMenu()
 	if (ImGui::BeginMenu("Controls"))
 	{
 		ImGui::TextUnformatted("Triggers / bumpers   Flippers");
+		ImGui::TextUnformatted("Grip at cabinet side Press that flipper button");
+		ImGui::TextUnformatted("Grip plunger knob    Pull back, let go to launch");
 		ImGui::TextUnformatted("A                    Plunger (hold, release)");
 		ImGui::TextUnformatted("Left stick / D-pad   Nudge left, right, up");
 		ImGui::TextUnformatted("B                    Pause");
@@ -1662,6 +1665,7 @@ void winmain::VrMenu()
 		ImGui::TextUnformatted("Right stick          Move table, change tilt");
 		ImGui::TextUnformatted("Right stick click    Recenter");
 		ImGui::TextUnformatted("Menu / View          This menu");
+		ImGui::TextUnformatted("Both grips (paused)  Move / turn the table");
 		ImGui::TextUnformatted("In menus: point and pull a trigger.");
 		ImGui::Separator();
 		ImGui::Text("Controller profile: %s", vr::InteractionProfileName());
@@ -1836,7 +1840,18 @@ void winmain::VrMainLoop()
 		has_focus = true;
 		const bool ui = VrUiVisible();
 		vr::Input in;
-		vr::SyncInput(in, ui);
+		vr::SyncInput(in, ui, single_step);
+
+		// Grabbed plunger knob: pulling back charges it to match, letting go launches the ball.
+		{
+			static bool analogPlunger = false;
+			if (!in.PlungerGrabbed)
+				analogPlunger = false;
+			else if (in.PlungerPull > 0.03f)
+				analogPlunger = true;
+			TPlunger::AnalogPull = analogPlunger ? in.PlungerPull : -1.0f;
+			in.Plunger = in.Plunger || analogPlunger;
+		}
 
 		// Pause while the headset is off or a system overlay has focus.
 		const bool focused = vr::IsSessionFocused();
@@ -1974,6 +1989,23 @@ void winmain::VrMainLoop()
 		SDL_RenderClear(Renderer);
 		SDL_RenderFillRect(Renderer, nullptr);
 		render::PresentVScreen();
+
+		// While a menu or dialog is open, keep a copy of the frame without it for the cabinet's screens,
+		// so menus only appear on the floating panel.
+		static std::vector<uint8_t> gameOnlyFrame;
+		const bool menusShown = VrUiVisible();
+		if (menusShown && VrSurface)
+		{
+#if SDL_VERSION_ATLEAST(2, 0, 10)
+			SDL_RenderFlush(Renderer);
+#endif
+			SDL_LockSurface(VrSurface);
+			const size_t bytes = static_cast<size_t>(VrSurface->pitch) * VrSurface->h;
+			gameOnlyFrame.resize(bytes);
+			memcpy(gameOnlyFrame.data(), VrSurface->pixels, bytes);
+			SDL_UnlockSurface(VrSurface);
+		}
+
 		ImGui::Render();
 		ImGui_Render_RenderDrawData(ImGui::GetDrawData());
 		SDL_RenderPresent(Renderer);
@@ -1988,6 +2020,7 @@ void winmain::VrMainLoop()
 			image.Width = VrSurface->w;
 			image.Height = VrSurface->h;
 			image.Pitch = VrSurface->pitch;
+			image.GamePixels = menusShown ? gameOnlyFrame.data() : nullptr;
 
 			const auto& d = render::DestinationRect;
 			float coef = 375.0f / 600.0f;

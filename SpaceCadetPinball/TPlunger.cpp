@@ -11,6 +11,8 @@
 #include "timer.h"
 #include "TPinballTable.h"
 
+float TPlunger::AnalogPull = -1.0f;
+
 TPlunger::TPlunger(TPinballTable* table, int groupIndex) : TCollisionComponent(table, groupIndex, true)
 {
 	visualStruct visual{};
@@ -168,7 +170,13 @@ void TPlunger::PullbackTimer(int timerId, void* caller)
 {
 	auto plunger = static_cast<TPlunger*>(caller);
 	plunger->Boost += plunger->PullbackIncrement;
-	if (plunger->Boost <= plunger->MaxPullback)
+	if (AnalogPull >= 0.0f && !plunger->SomeCounter)
+	{
+		// Follow the physical plunger instead of charging over time.
+		plunger->Boost = std::min(AnalogPull, 1.0f) * plunger->MaxPullback;
+		plunger->PullbackTimer_ = timer::set(plunger->PullbackDelay, plunger, PullbackTimer);
+	}
+	else if (plunger->Boost <= plunger->MaxPullback)
 	{
 		if (plunger->SomeCounter)
 		{
