@@ -114,6 +114,10 @@ push and pull request, inside Valve's Steam Linux Runtime 3.0 "sniper" SDK conta
 **Artifacts**. Pushing a tag such as `v1.0.0` also creates a GitHub release with both packages attached.
 The arm64 job uses GitHub's `ubuntu-24.04-arm` runner, which is free for public repositories.
 
+Packaged builds link SDL2_mixer statically (`-DSCP_BUNDLE_SDL_MIXER=ON`, WAV + MIDI only), because the
+Steam Linux Runtime 3.0 ARM64 provides SDL2 but not SDL2_mixer. MIDI music needs Timidity instrument
+patches, which SteamOS doesn't ship, so music stays silent there (it is off by default); sound effects work.
+
 The same packaging runs locally with `Platform/SteamFrame/build-linux.sh [output-dir]`. It checks that
 the binaries need no newer glibc than the runtime's 2.31 (set `MAX_GLIBC=none` to skip this outside the
 SDK).

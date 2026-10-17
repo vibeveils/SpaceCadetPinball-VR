@@ -35,9 +35,41 @@ endif()
 set(SDL2_BUILDING_LIBRARY ON)
 
 find_package(SDL2 REQUIRED)
-FIND_PACKAGE(SDL2_mixer REQUIRED)
 
-include_directories(${SDL2_INCLUDE_DIR} ${SDL2_MIXER_INCLUDE_DIR})
+# SDL2_mixer is not part of every runtime (e.g. Steam Linux Runtime 3.0 ARM64 on the Steam Frame).
+# With SCP_BUNDLE_SDL_MIXER it is built from source and linked statically, with only the features the
+# game uses (WAV sound effects, MIDI music via the built-in Timidity), so it adds no other dependencies.
+option(SCP_BUNDLE_SDL_MIXER "Build SDL2_mixer from source and link it statically" OFF)
+if(SCP_BUNDLE_SDL_MIXER)
+    include(FetchContent)
+    # SDL_mixer's static build wants an SDL2::SDL2-static target; point it at the SDL2 found above.
+    if(NOT TARGET SDL2::SDL2-static)
+        add_library(SDL2::SDL2-static INTERFACE IMPORTED)
+        set_target_properties(SDL2::SDL2-static PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "${SDL2_LIBRARY}")
+    endif()
+    foreach(_opt SDL2MIXER_INSTALL SDL2MIXER_SAMPLES SDL2MIXER_VENDORED SDL2MIXER_CMD SDL2MIXER_FLAC
+            SDL2MIXER_GME SDL2MIXER_MOD SDL2MIXER_MP3 SDL2MIXER_OPUS SDL2MIXER_VORBIS SDL2MIXER_WAVPACK
+            SDL2MIXER_MIDI_FLUIDSYNTH SDL2MIXER_MIDI_NATIVE)
+        set(${_opt} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    foreach(_opt SDL2MIXER_WAVE SDL2MIXER_MIDI SDL2MIXER_MIDI_TIMIDITY)
+        set(${_opt} ON CACHE BOOL "" FORCE)
+    endforeach()
+    FetchContent_Declare(sdl2_mixer
+        URL https://github.com/libsdl-org/SDL_mixer/archive/refs/tags/release-2.8.1.tar.gz)
+    set(_scp_build_shared ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_MakeAvailable(sdl2_mixer)
+    set(BUILD_SHARED_LIBS ${_scp_build_shared})
+    set(SDL2_MIXER_LIBRARY SDL2_mixer::SDL2_mixer-static)
+    set(SDL2_MIXER_INCLUDE_DIR "${sdl2_mixer_SOURCE_DIR}/include")
+else()
+    FIND_PACKAGE(SDL2_mixer REQUIRED)
+endif()
+
+include_directories(${SDL2_MIXER_INCLUDE_DIR} ${SDL2_INCLUDE_DIR})
 get_property(dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
 foreach(dir ${dirs})
   message(STATUS "Include dir='${dir}'")
