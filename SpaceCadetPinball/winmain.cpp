@@ -12,6 +12,7 @@
 #include "translations.h"
 #include "font_selection.h"
 #include "TPinballTable.h"
+#include "proj.h"
 #include <cfloat>
 
 #ifdef SCP_VR
@@ -1672,6 +1673,117 @@ void winmain::VrMenu()
 #endif
 }
 
+#ifdef SCP_VR
+// ---------------------------------------------------------------------------- VR artwork layout
+// The table bitmap is a perspective rendering of a flat table. The game keeps the camera it was rendered
+// with (proj), so the VR view can map a flat rectangle back onto the image and let VR provide the
+// perspective instead. The edges of the painted metal frames are detected from the image itself.
+namespace
+{
+	struct VrArtwork
+	{
+		bool Valid = false;
+		float WorldLeftX = 0, WorldRightX = 0, WorldNearY = 0, WorldFarY = 0;
+		float SideMin[2] = {0, 0}, SideMax[2] = {0, 0}; // score panel bounds, vscreen pixels
+		SDL_Rect Dest{};
+		int SurfW = 1, SurfH = 1, VW = 1, VH = 1;
+		gdrv_bitmap8* Screen = nullptr;
+		int Frames = 0;
+	} VrArt;
+
+	bool VrBright(const gdrv_bitmap8* bmp, int x, int y)
+	{
+		auto c = bmp->BmpBufPtr1[y * bmp->Stride + x];
+		return std::max({c.GetRed(), c.GetGreen(), c.GetBlue()}) > 24;
+	}
+
+	void VrPlayfieldMap(float s, float t, float* u, float* v)
+	{
+		const auto& a = VrArt;
+		vector3 pt{a.WorldLeftX + (a.WorldRightX - a.WorldLeftX) * s, a.WorldNearY + (a.WorldFarY - a.WorldNearY) * t, 0};
+		auto p = proj::xform_to_2d_f(pt);
+		*u = (a.Dest.x + p.X * a.Dest.w / a.VW) / a.SurfW;
+		*v = (a.Dest.y + p.Y * a.Dest.h / a.VH) / a.SurfH;
+	}
+}
+
+void winmain::VrUpdateArtworkLayout(vr::FrameLayout& layout, int surfW, int surfH)
+{
+	auto bmp = render::vscreen;
+	if (!pb::MainTable || !bmp || bmp->Width <= 0 || !bmp->BmpBufPtr1)
+		return;
+	auto& a = VrArt;
+	const auto& d = render::DestinationRect;
+	if (!a.Valid || a.Screen != bmp || a.Dest.w != d.w || a.Dest.h != d.h || a.Dest.x != d.x || a.Dest.y != d.y ||
+		++a.Frames % 300 == 0)
+	{
+		a.Screen = bmp;
+		a.Dest = d;
+		a.SurfW = surfW;
+		a.SurfH = surfH;
+		a.VW = bmp->Width;
+		a.VH = bmp->Height;
+		const int boardW = std::min(pb::MainTable->Width, bmp->Width);
+
+		// Playfield frame: left/right on the bottom row, top edge in the middle column.
+		int xl = 0, xr = boardW, yt = 0;
+		const int yb = bmp->Height - 1;
+		while (xl < boardW - 1 && !VrBright(bmp, xl, yb)) xl++;
+		while (xr > xl + 1 && !VrBright(bmp, xr - 1, yb)) xr--;
+		while (yt < bmp->Height / 2 && !VrBright(bmp, boardW / 2, yt)) yt++;
+		if (xr - xl < boardW / 2)
+		{
+			xl = 0;
+			xr = boardW;
+		}
+		auto wl = proj::ReverseXFormF(static_cast<float>(xl), static_cast<float>(bmp->Height));
+		auto wr = proj::ReverseXFormF(static_cast<float>(xr), static_cast<float>(bmp->Height));
+		auto wt = proj::ReverseXFormF(boardW * 0.5f, static_cast<float>(yt));
+		a.WorldLeftX = wl.X;
+		a.WorldRightX = wr.X;
+		a.WorldNearY = wl.Y;
+		a.WorldFarY = wt.Y;
+
+		// Score panel: bounding box of the non-black artwork right of the table.
+		int minX = bmp->Width, minY = bmp->Height, maxX = -1, maxY = -1;
+		for (int y = 0; y < bmp->Height; y++)
+			for (int x = boardW; x < bmp->Width; x++)
+				if (VrBright(bmp, x, y))
+				{
+					minX = std::min(minX, x);
+					maxX = std::max(maxX, x);
+					minY = std::min(minY, y);
+					maxY = std::max(maxY, y);
+				}
+		if (maxX > minX && maxY > minY)
+		{
+			a.SideMin[0] = static_cast<float>(minX);
+			a.SideMin[1] = static_cast<float>(minY);
+			a.SideMax[0] = static_cast<float>(maxX + 1);
+			a.SideMax[1] = static_cast<float>(maxY + 1);
+		}
+		else
+		{
+			a.SideMin[0] = static_cast<float>(boardW);
+			a.SideMin[1] = 0;
+			a.SideMax[0] = static_cast<float>(bmp->Width);
+			a.SideMax[1] = static_cast<float>(bmp->Height);
+		}
+		const float width = std::fabs(a.WorldRightX - a.WorldLeftX);
+		a.Valid = width > 1e-3f && std::fabs(a.WorldFarY - a.WorldNearY) > 1e-3f;
+	}
+	if (!a.Valid)
+		return;
+
+	layout.PlayfieldMap = VrPlayfieldMap;
+	layout.PlayfieldAspect = std::fabs(a.WorldFarY - a.WorldNearY) / std::fabs(a.WorldRightX - a.WorldLeftX);
+	layout.Sidebar[0] = (a.Dest.x + a.SideMin[0] * a.Dest.w / a.VW) / surfW;
+	layout.Sidebar[1] = (a.Dest.y + a.SideMin[1] * a.Dest.h / a.VH) / surfH;
+	layout.Sidebar[2] = (a.Dest.x + a.SideMax[0] * a.Dest.w / a.VW) / surfW;
+	layout.Sidebar[3] = (a.Dest.y + a.SideMax[1] * a.Dest.h / a.VH) / surfH;
+}
+#endif
+
 void winmain::VrMainLoop()
 {
 #ifdef SCP_VR
@@ -1888,6 +2000,7 @@ void winmain::VrMainLoop()
 			memcpy(layout.Board, board, sizeof board);
 			memcpy(layout.Sidebar, side, sizeof side);
 			memcpy(layout.Game, game, sizeof game);
+			VrUpdateArtworkLayout(layout, image.Width, image.Height);
 		}
 		vr::EndFrame(image, layout, VrUiVisible());
 		if (VrSurface)

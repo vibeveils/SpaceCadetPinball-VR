@@ -2,6 +2,9 @@
 #include "gdrv.h"
 
 enum class GameBindings;
+#ifdef SCP_VR
+namespace vr { struct FrameLayout; }
+#endif
 
 struct SdlTickClock
 {
@@ -118,6 +121,9 @@ private:
 	static bool VrUiVisible();
 	static void VrMenu();
 	static void VrSyncSettings(bool toVr);
+#ifdef SCP_VR
+	static void VrUpdateArtworkLayout(vr::FrameLayout& layout, int surfW, int surfH);
+#endif
 	static SDL_Surface* VrSurface;
 	static int VrRenderScale;
 	static bool VrMenuPaused;
